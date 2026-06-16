@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartInvest Pro | 穩定修復版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        .profit { color: #ef4444; } .loss { color: #10b981; }
+        .loading-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <header class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800">投資資產管理</h1>
+                <div id="statusInfo" class="text-xs text-slate-400 mt-1">系統就緒</div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="exportCSV()" class="bg-white border px-4 py-2 rounded-xl text-sm hover:bg-slate-50 transition">匯出 CSV</button>
+                <button id="btnUpdate" onclick="updatePrices()" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm flex items-center shadow-md transition disabled:opacity-50">
+                    <i id="refreshIcon" class="fas fa-sync-alt mr-2"></i>更新現價
+                </button>
+                <button onclick="toggleModal()" class="bg-slate-800 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md hover:bg-slate-700 transition">
+                    + 新增交易
+                </button>
+            </div>
+        </header>
+
+        <!-- 資產總覽 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="card p-6 border-t-4 border-blue-500">
+                <div class="text-slate-400 text-xs font-bold mb-1">資產總市值</div>
+                <div id="totalValue" class="text-2xl font-bold text-slate-800">$0</div>
+            </div>
+            <div class="card p-6 border-t-4 border-red-500">
+                <div class="text-slate-400 text-xs font-bold mb-1">未實現損益</div>
+                <div id="totalUnrealized" class="text-2xl font-bold">$0</div>
+            </div>
+            <div class="card p-6 border-t-4 border-emerald-500">
+                <div class="text-slate-400 text-xs font-bold mb-1">已實現損益</div>
+                <div id="totalRealized" class="text-2xl font-bold text-slate-700">$0</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- 庫存明細 -->
+            <div class="lg:col-span-2">
+                <div class="card overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-slate-50 text-[10px] text-slate-400 uppercase">
+                                <tr>
+                                    <th class="px-6 py-4">股票</th>
+                                    <th class="px-6 py-4 text-right">股數</th>
+                                    <th class="px-6 py-4 text-right">成本</th>
+                                    <th class="px-6 py-4 text-right text-blue-600">現價</th>
+                                    <th class="px-6 py-4 text-right">損益</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inventoryBody" class="divide-y divide-slate-100 text-sm"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 圖表 -->
+            <div class="lg:col-span-1">
+                <div class="card p-6 flex flex-col items-center">
+                    <h3 class="font-bold text-slate-700 mb-6 text-sm">資產比例</h3>
+                    <div class="w-full aspect-square"><canvas id="allocationChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white p-8 rounded-2xl max-w-sm w-full shadow-2xl">
+            <h3 class="text-xl font-bold mb-6">新增交易</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1">股票代號 (如: 2330)</label>
+                    <input type="text" id="symbol" class="w-full border p-3 rounded-xl uppercase outline-none focus:border-blue-500">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-400 mb-1">市場類型</label>
+                        <select id="market" class="w-full border p-3 rounded-xl bg-white">
+                            <option value=".TW">上市 (.TW)</option>
+                            <option value=".TWO">上櫃 (.TWO)</option>
+                            <option value="">美股</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-400 mb-1">類型</label>
+                        <select id="type" class="w-full border p-3 rounded-xl bg-white">
+                            <option value="buy">買進 (+)</option>
+                            <option value="sell">賣出 (-)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <input type="number" id="qty" class="w-full border p-3 rounded-xl" placeholder="股數">
+                    <input type="number" id="price" class="w-full border p-3 rounded-xl" placeholder="價格">
+                </div>
+                <input type="date" id="date" class="w-full border p-3 rounded-xl">
+                <div class="flex gap-2 pt-4">
+                    <button onclick="toggleModal()" class="flex-1 py-3 bg-slate-100 rounded-xl hover:bg-slate-200">取消</button>
+                    <button onclick="addTrade()" class="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700">儲存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let trades = JSON.parse(localStorage.getItem('trades')) || [];
+        let currentPrices = JSON.parse(localStorage.getItem('currentPrices')) || {};
+        let myChart = null;
+
+        document.getElementById('date').valueAsDate = new Date();
+
+        function toggleModal() { document.getElementById('modal').classList.toggle('hidden'); }
+
+        function addTrade() {
+            const sym = document.getElementById('symbol').value.toUpperCase().trim();
+            const mkt = document.getElementById('market').value;
+            const fullSymbol = /^\d+$/.test(sym) ? sym + mkt : sym;
+
+            const qty = parseFloat(document.getElementById('qty').value);
+            const price = parseFloat(document.getElementById('price').value);
+            const type = document.getElementById('type').value;
+
+            if(!fullSymbol || isNaN(qty) || isNaN(price)) return alert("請完整填寫股數與價格");
+
+            if(type === 'sell') {
+                const { portfolio } = calculatePortfolio();
+                if((portfolio[fullSymbol]?.qty || 0) < qty) return alert("❌ 庫存不足以賣出");
+            }
+
+            trades.push({ id: Date.now(), symbol: fullSymbol, type, qty, price, date: document.getElementById('date').value });
+            localStorage.setItem('trades', JSON.stringify(trades));
+            
+            // 清空輸入欄位
+            document.getElementById('symbol').value = '';
+            document.getElementById('qty').value = '';
+            document.getElementById('price').value = '';
+
+            toggleModal();
+            render();
+        }
+
+        async function updatePrices() {
+            const { portfolio } = calculatePortfolio();
+            const symbols = Object.keys(portfolio).filter(s => portfolio[s].qty > 0);
+            if(symbols.length === 0) return alert("目前帳戶無庫存");
+
+            const btn = document.getElementById('btnUpdate');
+            const icon = document.getElementById('refreshIcon');
+            const status = document.getElementById('statusInfo');
+
+            btn.disabled = true;
+            icon.classList.add('loading-spin');
+            status.innerText = "正在連線至 Yahoo Finance...";
+
+            try {
+                for(let s of symbols) {
+                    status.innerText = `正在更新 ${s}...`;
+                    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${s}`)}&timestamp=${Date.now()}`;
+                    
+                    const response = await fetch(proxyUrl);
+                    if (!response.ok) throw new Error("網路請求失敗");
+                    
+                    const result = await response.json();
+                    const data = JSON.parse(result.contents);
+                    
+                    const price = data.chart.result[0].meta.regularMarketPrice;
+                    if(price) {
+                        currentPrices[s] = price;
+                        localStorage.setItem('currentPrices', JSON.stringify(currentPrices));
+                    }
+                    await new Promise(r => setTimeout(r, 500)); // 避免被當作攻擊
+                }
+                status.innerText = `更新完成: ${new Date().toLocaleTimeString()}`;
+            } catch (e) {
+                console.error(e);
+                status.innerText = "更新失敗，請稍後再試或檢查網路。";
+                alert("API 更新遇到問題（可能是 Proxy 過載），您可以先手動點擊現價進行修改。");
+            } finally {
+                btn.disabled = false;
+                icon.classList.remove('loading-spin');
+                render();
+            }
+        }
+
+        function calculatePortfolio() {
+            const portfolio = {};
+            let totalRealized = 0;
+            const sortedTrades = [...trades].sort((a,b) => new Date(a.date) - new Date(b.date));
+            
+            sortedTrades.forEach(t => {
+                if(!portfolio[t.symbol]) portfolio[t.symbol] = {qty:0, cost:0};
+                const p = portfolio[t.symbol];
+                if(t.type === 'buy') {
+                    p.qty += t.qty;
+                    p.cost += (t.qty * t.price);
+                } else {
+                    const avg = p.cost / p.qty;
+                    totalRealized += (t.price - avg) * t.qty;
+                    p.qty -= t.qty;
+                    p.cost -= (avg * t.qty);
+                }
+            });
+            return { portfolio, totalRealized };
+        }
+
+        function render() {
+            const { portfolio, totalRealized } = calculatePortfolio();
+            const body = document.getElementById('inventoryBody');
+            body.innerHTML = '';
+            let totalMV = 0, totalUV = 0;
+            const labels = [], values = [];
+
+            for(const s in portfolio) {
+                const d = portfolio[s];
+                if(d.qty <= 0) continue;
+
+                const avg = d.cost / d.qty;
+                const cur = currentPrices[s] || avg;
+                const mv = d.qty * cur;
+                const uv = (cur - avg) * d.qty;
+                
+                totalMV += mv; totalUV += uv;
+                labels.push(s); values.push(mv.toFixed(0));
+
+                body.innerHTML += `
+                    <tr class="hover:bg-slate-50 transition">
+                        <td class="px-6 py-4 font-bold text-slate-700">${s}</td>
+                        <td class="px-6 py-4 text-right">${d.qty.toLocaleString()}</td>
+                        <td class="px-6 py-4 text-right text-slate-400">$${avg.toFixed(2)}</td>
+                        <td class="px-6 py-4 text-right text-blue-600 font-bold cursor-pointer" onclick="manualUpdate('${s}')">$${cur.toLocaleString()}</td>
+                        <td class="px-6 py-4 text-right font-bold ${uv>=0?'profit':'loss'}">
+                            ${uv>=0?'+':''}${uv.toLocaleString(undefined,{maximumFractionDigits:0})}
+                            <div class="text-[9px] font-normal">${((cur/avg-1)*100).toFixed(2)}%</div>
+                        </td>
+                    </tr>`;
+            }
+
+            document.getElementById('totalValue').innerText = `$${totalMV.toLocaleString(undefined,{maximumFractionDigits:0})}`;
+            document.getElementById('totalUnrealized').innerText = `$${totalUV.toLocaleString(undefined,{maximumFractionDigits:0})}`;
+            document.getElementById('totalUnrealized').className = `text-2xl font-bold ${totalUV>=0?'profit':'loss'}`;
+            document.getElementById('totalRealized').innerText = `$${totalRealized.toLocaleString(undefined,{maximumFractionDigits:0})}`;
+            
+            updateChart(labels, values);
+        }
+
+        function manualUpdate(s) {
+            const p = prompt(`請手動輸入 ${s} 的現價:`, currentPrices[s] || "");
+            if(p !== null && !isNaN(parseFloat(p))) { 
+                currentPrices[s] = parseFloat(p); 
+                localStorage.setItem('currentPrices', JSON.stringify(currentPrices));
+                render(); 
+            }
+        }
+
+        function updateChart(labels, values) {
+            const ctx = document.getElementById('allocationChart').getContext('2d');
+            if(myChart) myChart.destroy();
+            if(labels.length === 0) return;
+            myChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels, datasets: [{ data: values, backgroundColor: ['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6','#64748b'], borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } }, cutout: '75%' }
+            });
+        }
+
+        function exportCSV() {
+            if(trades.length === 0) return alert("尚無紀錄可匯出");
+            let csv = "\uFEFF日期,股票代號,交易類型,股數,單價\n";
+            trades.forEach(t => csv += `${t.date},${t.symbol},${t.type === 'buy'?'買進':'賣出'},${t.qty},${t.price}\n`);
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `我的持股紀錄_${new Date().toLocaleDateString()}.csv`;
+            link.click();
+        }
+
+        render();
+    </script>
+</body>
+</html>
